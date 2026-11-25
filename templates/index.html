@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Advisor digest · {{ digest.week_label if digest else "Student file" }}</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,560;9..144,640&family=Outfit:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+</head>
+<body>
+  <header class="cover">
+    <div class="wrap">
+      <p class="eyebrow">Phase 1 · Rule-based digest</p>
+      <h1>Advisor digest</h1>
+      {% if digest %}
+      <p class="lede">{{ digest.week_label }}. Students are ranked for contact this week. Each card says <strong>why they are on the list</strong> and includes <strong>one message written for their blocker</strong>. Scores use draft rules you can change. Nothing is sent to students.</p>
+      <div class="meta-row">
+        <span>Scored as of {{ as_of_label }}</span>
+        <span>{{ digest.source_name }}</span>
+        <span>{{ digest.advisors|length }} advisors</span>
+      </div>
+      <div class="stats">
+        <button type="button" data-filter-group="priority" data-value="all" aria-pressed="false" aria-label="Show all {{ digest.students|length }} students"><strong>{{ digest.students|length }}</strong> students</button>
+        <button type="button" data-filter-group="priority" data-value="flagged" aria-pressed="true" aria-label="Show the {{ digest.flagged|length }} students on the contact list"><strong>{{ digest.flagged|length }}</strong> on the list</button>
+        <button type="button" class="stat-high" data-filter-group="priority" data-value="High" aria-pressed="false" aria-label="Show high priority underperformers"><strong>{{ digest.count('High') }}</strong> High · Underperformers</button>
+        <button type="button" class="stat-medium" data-filter-group="priority" data-value="Medium" aria-pressed="false" aria-label="Show medium priority average performers"><strong>{{ digest.count('Medium') }}</strong> Medium · Average performers</button>
+        <button type="button" class="stat-low" data-filter-group="priority" data-value="Low" aria-pressed="false" aria-label="Show low priority satisfactory performers"><strong>{{ digest.count('Low') }}</strong> Low · Satisfactory performers</button>
+      </div>
+      {% else %}
+      <p class="lede">The student file could not be scored.</p>
+      {% endif %}
+    </div>
+  </header>
+
+  <main class="page">
+    <div class="wrap">
+      {% with messages = get_flashed_messages() %}
+      {% if messages %}
+      <ul class="flash">
+        {% for message in messages %}<li>{{ message }}</li>{% endfor %}
+      </ul>
+      {% endif %}
+      {% endwith %}
+      {% if error %}<p class="error">{{ error }}</p>{% endif %}
+
+      <div class="toolbar">
+        <form class="file-form" action="{{ url_for('upload') }}" method="post" enctype="multipart/form-data">
+          <input type="file" name="file" accept=".csv,text/csv" aria-label="Student CSV">
+          <button class="file-button" type="submit">Upload CSV</button>
+        </form>
+        <form class="inline-form" action="{{ url_for('reset_file') }}" method="post">
+          <button class="text-button" type="submit">Use sample file</button>
+        </form>
+        <a class="primary" href="{{ url_for('export_xlsx') }}">Export Excel</a>
+        <button class="text-button" type="button" onclick="window.print()">Print / PDF</button>
+        <input class="search" id="search" type="search" placeholder="Search name, ID, program" aria-label="Search students">
+        {% if digest %}
+        <div class="filters" aria-label="Advisors">
+          <button type="button" data-filter-group="advisor" data-value="all" aria-pressed="true">All advisors</button>
+          {% for group in digest.advisors %}
+          <button type="button" data-filter-group="advisor" data-value="{{ group.name }}" aria-pressed="false">{{ group.name }} · {{ group.flagged|length }}</button>
+          {% endfor %}
+        </div>
+        {% endif %}
+      </div>
+
+      <details class="rules">
+        <summary>Draft scoring rules</summary>
+        <p>High priority (underperformers) is {{ digest.rules.high_min if digest else 45 }} points or more. Medium priority (average performers) starts at {{ digest.rules.medium_min if digest else 20 }}. Low priority (satisfactory performers) is anyone still on the list below that. Anyone who fires no rule is left off the contact list. “Not applied” for financial aid is not a flag. A later phase can keep this same blocker list and only change how the message is worded.</p>
+        <form action="{{ url_for('settings') }}" method="post">
+          <label>Digest date
+            <input type="date" name="as_of" value="{{ as_of }}" required>
+          </label>
+          <div class="rule-grid">
+            {% for group, fields in form_groups %}
+            <fieldset>
+              <legend>{{ group }}</legend>
+              {% for field in fields %}
+              <label>{{ field.label }}
+                <input type="number" name="{{ field.name }}" value="{{ field.value }}" min="{{ field.min }}" max="{{ field.max }}" step="{{ field.step }}" required>
+              </label>
+              {% endfor %}
+            </fieldset>
+            {% endfor %}
+          </div>
+          <div class="form-actions">
+            <button class="primary" type="submit">Recalculate</button>
+          </div>
+        </form>
+        <form action="{{ url_for('reset_rules') }}" method="post">
+          <button class="text-button" type="submit">Reset draft rules</button>
+        </form>
+        {% if digest and digest.warnings %}
+        <div class="note">
+          {% for warning in digest.warnings %}<p>{{ warning }}</p>{% endfor %}
+        </div>
+        {% endif %}
+      </details>
+
+      {% if digest %}
+      <section class="roster" id="roster" hidden>
+        <div class="advisor-head">
+          <h2>All students</h2>
+          <p id="roster-count"></p>
+        </div>
+        <ol class="roster-list">
+          {% for student in digest.students %}
+          {% set person = student.student %}
+          <li class="roster-row priority-{{ student.priority|lower }}" data-roster-item data-advisor="{{ person.advisor }}" data-priority="{{ student.priority }}" data-search="{{ (person.name ~ ' ' ~ person.student_id ~ ' ' ~ person.program ~ ' ' ~ person.advisor)|lower }}">
+            <span class="rank-no">{% if student.rank %}{{ student.rank }}{% else %}–{% endif %}</span>
+            <div>
+              <strong>{{ person.name }}</strong>
+              <p>{{ person.student_id }} · {{ person.program }} · {{ person.advisor }}</p>
+            </div>
+            <span class="tag-pair">
+              {% if student.flagged %}<span class="priority-tag priority-{{ student.priority|lower }}">{{ student.priority }}</span>{% endif %}
+              <span class="priority-mark priority-{{ student.priority|lower }}">{{ student.priority_label }}</span>
+            </span>
+            <span class="roster-facts">{% if person.gpa is not none %}GPA {{ "%.2f"|format(person.gpa) }}{% endif %}{% if person.grade %} · {{ person.grade }}{% endif %}{% if student.flagged %} · {{ student.score }} pts{% endif %}</span>
+          </li>
+          {% endfor %}
+        </ol>
+      </section>
+
+      <section class="top" id="top">
+        <h2>Contact first</h2>
+        <ol>
+          {% for student in digest.top %}
+          <li data-student data-advisor="{{ student.student.advisor }}" data-priority="{{ student.priority }}" data-search="{{ (student.student.name ~ ' ' ~ student.student.student_id ~ ' ' ~ student.student.program)|lower }}">
+            <button class="jump" type="button" data-jump="student-{{ student.student.student_id }}">
+              <span class="rank-no">{{ student.rank }}</span>
+              <strong>{{ student.student.name }}</strong>
+              <small><span class="priority-tag priority-{{ student.priority|lower }}">{{ student.priority }}</span> <span class="priority-mark priority-{{ student.priority|lower }}">{{ student.priority_label }}</span> · {{ student.score }} pts · {{ student.student.advisor }}</small>
+              <span class="chips">
+                {% for finding in student.findings[:3] %}<span class="chip">{{ finding.label }}</span>{% endfor %}
+              </span>
+            </button>
+          </li>
+          {% endfor %}
+        </ol>
+      </section>
+
+      {% for group in digest.advisors %}
+      <section class="advisor" data-advisor-section="{{ group.name }}">
+        <div class="advisor-head">
+          <h2>{{ group.name }}</h2>
+          <p>{{ group.flagged|length }} to contact · {{ group.clear|length }} with no flag · {{ group.caseload }} in caseload</p>
+        </div>
+        {% for student in group.flagged %}
+        {% set person = student.student %}
+        <article class="card priority-{{ student.priority|lower }}" id="student-{{ person.student_id }}" data-card data-student data-advisor="{{ person.advisor }}" data-priority="{{ student.priority }}" data-search="{{ (person.name ~ ' ' ~ person.student_id ~ ' ' ~ person.program ~ ' ' ~ person.goal ~ ' ' ~ person.advisor)|lower }}">
+          <div class="card-rank">
+            <span class="rank-no">{{ student.advisor_rank }}</span>
+            <div class="priority-tag priority-{{ student.priority|lower }}">{{ student.priority }}</div>
+            <small class="muted">College #{{ student.rank }}</small>
+          </div>
+          <div>
+            <div class="who">
+              <div>
+                <div class="name-row">
+                  <h3>{{ person.name }}</h3>
+                  <span class="priority-mark priority-{{ student.priority|lower }}">{{ student.priority_label }}</span>
+                </div>
+                <p class="idline">{{ person.student_id }} · {{ person.program }}</p>
+                <p class="goal">{{ person.goal }}</p>
+                <p class="meta">
+                  {{ person.enrollment_status }}{% if person.modality %} · {{ person.modality }}{% endif %}{% if person.units is not none %} · {{ person.units }} units{% endif %}{% if person.term_number is not none %} · Term {{ person.term_number }}{% endif %}
+                  {% if person.gpa is not none %} · GPA {{ "%.2f"|format(person.gpa) }}{% endif %}{% if person.grade %} · Grade {{ person.grade }}{% endif %}
+                </p>
+                <p class="contact">
+                  <a href="mailto:{{ person.email }}">{{ person.email }}</a>
+                  · <a href="{{ person.phone|tel }}">{{ person.phone }}</a>
+                  {% if person.last_advisor_contact %} · Last advisor contact {{ person.last_advisor_contact|day }}{% endif %}
+                  {% if person.last_outreach_date %} · {{ person.last_outreach_channel or "Outreach" }} {{ person.last_outreach_date|day }}{% if person.outreach_response %} · {{ person.outreach_response }}{% endif %}{% else %} · No outreach logged{% endif %}
+                </p>
+              </div>
+              <div class="score">{{ student.score }}<span>points</span></div>
+            </div>
+            <div class="split">
+              <section>
+                <h4>Why they’re flagged</h4>
+                <ul class="reasons">
+                  {% for finding in student.findings %}
+                  <li><span>{{ finding.detail }}</span><em>{{ finding.points }}</em></li>
+                  {% endfor %}
+                </ul>
+              </section>
+              <section>
+                <h4>{{ kind_label.get(student.outreach.kind, "Message") }}</h4>
+                <p class="channel">{{ student.outreach.channel }} · {{ student.outreach.reason }}</p>
+                <textarea id="msg-{{ person.student_id }}" aria-label="Suggested message for {{ person.name }}">{{ student.outreach.message }}</textarea>
+                <div class="actions">
+                  <button type="button" data-copy="{{ person.student_id }}">Copy</button>
+                  {% if person.email %}
+                  <button type="button" data-mailto="{{ person.student_id }}" data-email="{{ person.email }}" data-subject="Checking in, {{ person.first_name }}">Open email</button>
+                  {% endif %}
+                  {% if person.phone %}
+                  <a class="text-button" href="{{ person.phone|tel }}">Call {{ person.phone }}</a>
+                  {% endif %}
+                </div>
+                <p class="fine">Edit before you use it. The text only mentions blockers that fired for this student.</p>
+              </section>
+            </div>
+          </div>
+        </article>
+        {% endfor %}
+        {% if group.clear %}
+        <details class="clear" data-clear>
+          <summary>No flag this week ({{ group.clear|length }})</summary>
+          <ul>
+            {% for student in group.clear %}
+            <li data-clear-item data-student data-advisor="{{ student.student.advisor }}" data-priority="Clear" data-search="{{ (student.student.name ~ ' ' ~ student.student.student_id ~ ' ' ~ student.student.program)|lower }}">
+              {{ student.student.name }} · {{ student.student.student_id }} · {{ student.student.program }}{% if student.student.gpa is not none %} · GPA {{ "%.2f"|format(student.student.gpa) }}{% endif %}{% if student.student.grade %} · {{ student.student.grade }}{% endif %}
+            </li>
+            {% endfor %}
+          </ul>
+        </details>
+        {% endif %}
+      </section>
+      {% endfor %}
+      <p class="empty" id="empty" hidden>No students match this view.</p>
+      {% endif %}
+    </div>
+  </main>
+  <script src="{{ url_for('static', filename='app.js') }}"></script>
+</body>
+</html>
